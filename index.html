@@ -155,7 +155,7 @@ function select(i){
     if(o.context) h+=`<div class="ctx">${esc(o.context)}</div>`;
     if(typeof o.confidence==="number") h+=`<div class="mu">Confianza de la identificación: ${Math.round(o.confidence*100)}%</div>`;
     const q=encodeURIComponent(o.name||"");
-    h+=`<div class="mu" style="margin-top:8px">Comprobar: <a target="_blank" rel="noopener" href="https://es.wallapop.com/app/search?keywords=${q}">Wallapop</a> · <a target="_blank" rel="noopener" href="https://www.ebay.es/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1">eBay (vendidos)</a> · <a target="_blank" rel="noopener" href="https://www.google.com/search?tbm=shop&q=${q}">Shopping</a></div>`;
+    h+=`<div class="mu" style="margin-top:8px">Comprobar: <a target="_blank" rel="noopener" href="https://es.wallapop.com/app/search?keywords=${q}">Wallapop</a> · <a target="_blank" rel="noopener" href="https://www.ebay.es/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1">eBay (vendidos)</a> · <a target="_blank" rel="noopener" href="https://www.google.com/search?tbm=shop&q=${q}">Shopping</a> · <a target="_blank" rel="noopener" href="https://www.vinted.es/catalog?search_text=${q}">Vinted</a> · <a target="_blank" rel="noopener" href="https://www.amazon.es/s?k=${q}">Amazon</a></div>`;
     h+=`<p><button class="sec" type="button" onclick="select(-1)">Ver todos</button></p>`;
   } else h+=`<div class="mu">Pulsa un recuadro de la foto o un objeto de la lista.</div>`;
   h+=`<div class="list">`+items.map((o,k)=>`<button type="button" class="item${k===i?" sel":""}" onclick="select(${k})"><span>${esc(o.name||"Objeto")}</span><b>${eur(o.price_avg)}</b></button>`).join("")+`</div>`;
@@ -167,3 +167,4 @@ $("file").onchange=e=>analyze(e.target.files[0]);
 </script>
 </body>
 </html>
+
