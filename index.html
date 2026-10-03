@@ -69,7 +69,7 @@ a{color:var(--ac)}
 <script>
 const GEMINI_PROXY_URL = "https://gemini-proxy.francesc-adria-perello.workers.dev/";
 const $ = id => document.getElementById(id);
-let items = [], sel = -1;
+let items = [], sel = -1, lastAI = "";
 
 function status(t, err){ const s=$("status"); s.textContent=t||""; s.className=err?"err":""; }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -90,22 +90,41 @@ function toB64(file){
   });
 }
 
+async function callAI(url, body, label, retries){
+  let r;
+  for(let k=0;k<retries;k++){
+    r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(r.ok || ![500,502,503,504].includes(r.status)) break;
+    status(`${label} está saturado, reintentando (${k+2}/${retries})…`);
+    await new Promise(z=>setTimeout(z,2500));
+  }
+  return r;
+}
 async function askGemini(prompt, b64){
   const body = {
     contents:[{parts:[{text:prompt},{inline_data:{mime_type:"image/jpeg",data:b64}}]}],
     generationConfig:{responseMimeType:"application/json",temperature:0,thinkingConfig:{thinkingLevel:"low"}}
   };
-  let r;
-  for(let k=0;k<3;k++){
-    r = await fetch(GEMINI_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(r.ok || ![500,502,503,504].includes(r.status)) break;
-    status(`Gemini está saturado, reintentando (${k+2}/3)…`);
-    await new Promise(z=>setTimeout(z,2500));
+  let r, used = "Gemini";
+  try{ r = await callAI(GEMINI_PROXY_URL,body,"Gemini",2); }catch{ r = {ok:false,status:0}; }
+  if(!r.ok){
+    status("Gemini no disponible o con límite alcanzado. Probando OpenRouter gratuito…");
+    used = "OpenRouter (modelo gratuito)";
+    const orBody = {
+      contents:[{role:"user",parts:[{text:prompt+'\n\nFormato obligatorio: un objeto JSON {"objects":[ ...los objetos... ]} con las mismas claves (box_2d, name, etc.), sin Markdown.'},{inline_data:{mime_type:"image/jpeg",data:b64}}]}],
+      generationConfig:{responseMimeType:"application/json",temperature:0},
+      freeModel:"google/gemma-4-31b-it:free"
+    };
+    r = await callAI(GEMINI_PROXY_URL+"openrouter",orBody,"OpenRouter",2);
+    if(!r.ok) throw new Error(r.status===429?"Límites gratuitos de Gemini y OpenRouter alcanzados (OpenRouter: 20 peticiones/min y 50/día). Inténtalo más tarde.":`Ni Gemini ni OpenRouter respondieron (error ${r.status}).`);
   }
-  if(!r.ok) throw new Error(r.status===429?"Límite de uso de Gemini alcanzado. Inténtalo más tarde.":`Gemini respondió con error ${r.status}.`);
   const j = await r.json();
   const t = j?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("")||"";
-  try{ return JSON.parse(t.replace(/^```json|```$/g,"").trim()); }catch{ return null; }
+  let out=null;
+  try{ out = JSON.parse(t.replace(/^```json|```$/g,"").trim()); }catch{ return null; }
+  if(out && !Array.isArray(out) && Array.isArray(out.box_2d)) out=[out];
+  lastAI = used;
+  return out;
 }
 
 const PROMPT = `Analiza esta foto. Detecta TODOS los objetos relevantes y distinguibles (muebles, electrónica, libros, juguetes, herramientas, ropa, decoración, etc.), ignorando fondo, paredes, suelo y cosas diminutas o irrelevantes. Máximo 20 objetos. Para cada uno devuelve un recuadro ajustado y una ficha. Responde solo con un array JSON: [{"box_2d":[ymin,xmin,ymax,xmax],"name":string,"category":string,"context":string,"price_low":number|null,"price_avg":number|null,"price_high":number|null,"price_basis":string,"confidence":number}]. Reglas: box_2d son enteros de 0 a 1000 relativos al tamaño de la imagen. name y category en español (name concreto: marca y modelo si se ven; si no, descripción genérica). context: una frase corta en español (qué es, para qué sirve, estado o detalle visible). Precios en EUR: estimación del valor medio actual de venta en plataformas de segunda mano (Wallapop, eBay, Vinted) o, si es nuevo/de uso común, en comercio electrónico; price_low y price_high forman un rango razonable. price_basis: "segunda mano" o "nuevo". confidence de 0 a 1. Si no puedes estimar el precio, usa null. No inventes marcas ni modelos que no se vean.`;
@@ -117,13 +136,13 @@ async function analyze(file){
     status("Preparando la imagen…");
     const {dataUrl,b64} = await toB64(file);
     $("img").src = dataUrl;
-    status("Detectando objetos y estimando precios con Gemini (puede tardar hasta un minuto)…");
+    status("Detectando objetos y estimando precios con IA (Gemini, o OpenRouter gratuito si Gemini falla; puede tardar hasta un minuto)…");
     const out = await askGemini(PROMPT,b64);
     const arr = Array.isArray(out)?out:(out&&Array.isArray(out.objects)?out.objects:null);
     if(!arr) throw new Error("No he podido interpretar la respuesta. Prueba con otra foto.");
     items = arr.filter(o=>Array.isArray(o.box_2d)&&o.box_2d.length===4&&o.box_2d.every(Number.isFinite)).slice(0,20);
     if(!items.length) throw new Error("No he detectado objetos claros. Prueba con una foto más nítida o más cercana.");
-    render(); status(`${items.length} objetos detectados. Pulsa uno para ver su ficha.`);
+    render(); status(`${items.length} objetos detectados con ${lastAI}. Pulsa uno para ver su ficha.`);
   }catch(e){ status(e.message||"Error inesperado.",true); }
 }
 
