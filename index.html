@@ -64,7 +64,7 @@ a{color:var(--ac)}
     <div id="side"><div class="mu">Pulsa un recuadro de la foto o un objeto de la lista.</div><div class="list" id="list"></div></div>
   </div>
 </div>
-<p class="note">⚠️ Los precios son <b>estimaciones de la IA</b> basadas en su conocimiento general del mercado de segunda mano y comercio electrónico. No son anuncios en vivo ni tasaciones: compruébalos en Wallapop, eBay, Vinted o Amazon antes de comprar o vender. La imagen se envía a Google (Gemini) para analizarla.</p>
+<p class="note">⚠️ Los precios son <b>estimaciones de la IA</b> basadas en su conocimiento general del mercado de segunda mano y comercio electrónico. No son anuncios en vivo ni tasaciones: compruébalos en Wallapop, eBay, Vinted o Amazon antes de comprar o vender. La imagen se envía a OpenRouter (modelos gratuitos) o, si falla, a Google (Gemini) para analizarla.</p>
 </main>
 <script>
 const GEMINI_PROXY_URL = "https://gemini-proxy.francesc-adria-perello.workers.dev/";
@@ -105,18 +105,19 @@ async function askGemini(prompt, b64){
     contents:[{parts:[{text:prompt},{inline_data:{mime_type:"image/jpeg",data:b64}}]}],
     generationConfig:{responseMimeType:"application/json",temperature:0,thinkingConfig:{thinkingLevel:"low"}}
   };
-  let r, used = "Gemini";
-  try{ r = await callAI(GEMINI_PROXY_URL,body,"Gemini",2); }catch{ r = {ok:false,status:0}; }
+  const orBody = {
+    contents:[{role:"user",parts:[{text:prompt+'\n\nFormato obligatorio: un objeto JSON {"objects":[ ...los objetos... ]} con las mismas claves (box_2d, name, etc.), sin Markdown.'},{inline_data:{mime_type:"image/jpeg",data:b64}}]}],
+    generationConfig:{responseMimeType:"application/json",temperature:0},
+    freeModel:"google/gemma-4-31b-it:free"
+  };
+  let r, used = "OpenRouter (modelo gratuito)", orStatus = 0;
+  try{ r = await callAI(GEMINI_PROXY_URL+"openrouter",orBody,"OpenRouter",2); }catch{ r = {ok:false,status:0}; }
+  orStatus = r.status;
   if(!r.ok){
-    status("Gemini no disponible o con límite alcanzado. Probando OpenRouter gratuito…");
-    used = "OpenRouter (modelo gratuito)";
-    const orBody = {
-      contents:[{role:"user",parts:[{text:prompt+'\n\nFormato obligatorio: un objeto JSON {"objects":[ ...los objetos... ]} con las mismas claves (box_2d, name, etc.), sin Markdown.'},{inline_data:{mime_type:"image/jpeg",data:b64}}]}],
-      generationConfig:{responseMimeType:"application/json",temperature:0},
-      freeModel:"google/gemma-4-31b-it:free"
-    };
-    r = await callAI(GEMINI_PROXY_URL+"openrouter",orBody,"OpenRouter",2);
-    if(!r.ok) throw new Error(r.status===429?"Límites gratuitos de Gemini y OpenRouter alcanzados (OpenRouter: 20 peticiones/min y 50/día). Inténtalo más tarde.":`Ni Gemini ni OpenRouter respondieron (error ${r.status}).`);
+    status("OpenRouter gratuito no disponible o con límite alcanzado. Probando Gemini…");
+    used = "Gemini";
+    try{ r = await callAI(GEMINI_PROXY_URL,body,"Gemini",2); }catch{ r = {ok:false,status:0}; }
+    if(!r.ok) throw new Error((orStatus===429||r.status===429)?"Límites gratuitos de OpenRouter y Gemini alcanzados (OpenRouter: 20 peticiones/min y 50/día). Inténtalo más tarde.":`Ni OpenRouter ni Gemini respondieron (error ${r.status}).`);
   }
   const j = await r.json();
   const t = j?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("")||"";
@@ -136,7 +137,7 @@ async function analyze(file){
     status("Preparando la imagen…");
     const {dataUrl,b64} = await toB64(file);
     $("img").src = dataUrl;
-    status("Detectando objetos y estimando precios con IA (Gemini, o OpenRouter gratuito si Gemini falla; puede tardar hasta un minuto)…");
+    status("Detectando objetos y estimando precios con IA (OpenRouter gratuito, o Gemini si falla; puede tardar hasta un minuto)…");
     const out = await askGemini(PROMPT,b64);
     const arr = Array.isArray(out)?out:(out&&Array.isArray(out.objects)?out.objects:null);
     if(!arr) throw new Error("No he podido interpretar la respuesta. Prueba con otra foto.");
@@ -191,4 +192,3 @@ $("file").onchange=e=>analyze(e.target.files[0]);
 </script>
 </body>
 </html>
-
