@@ -92,7 +92,13 @@ async function askGemini(prompt, b64){
     contents:[{parts:[{text:prompt},{inline_data:{mime_type:"image/jpeg",data:b64}}]}],
     generationConfig:{responseMimeType:"application/json",temperature:0,thinkingConfig:{thinkingLevel:"low"}}
   };
-  const r = await fetch(GEMINI_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  let r;
+  for(let k=0;k<3;k++){
+    r = await fetch(GEMINI_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(r.ok || ![500,502,503,504].includes(r.status)) break;
+    status(`Gemini está saturado, reintentando (${k+2}/3)…`);
+    await new Promise(z=>setTimeout(z,2500));
+  }
   if(!r.ok) throw new Error(r.status===429?"Límite de uso de Gemini alcanzado. Inténtalo más tarde.":`Gemini respondió con error ${r.status}.`);
   const j = await r.json();
   const t = j?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("")||"";
@@ -108,7 +114,7 @@ async function analyze(file){
     status("Preparando la imagen…");
     const {dataUrl,b64} = await toB64(file);
     $("img").src = dataUrl;
-    status("Detectando objetos y estimando precios con Gemini…");
+    status("Detectando objetos y estimando precios con Gemini (puede tardar hasta un minuto)…");
     const out = await askGemini(PROMPT,b64);
     const arr = Array.isArray(out)?out:(out&&Array.isArray(out.objects)?out.objects:null);
     if(!arr) throw new Error("No he podido interpretar la respuesta. Prueba con otra foto.");
