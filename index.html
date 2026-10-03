@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tasa-Lens · Detecta objetos y tasa su precio</title>
+<style>
+:root{--bg:#0b0f0d;--card:#121916;--line:#22332b;--tx:#e8f1ec;--mu:#8fa699;--ac:#39ff88;--er:#ff8a80}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:radial-gradient(1200px 600px at 50% -10%,#10231a,var(--bg));color:var(--tx);line-height:1.5;min-height:100vh}
+main{max-width:980px;margin:0 auto;padding:24px 16px 60px}
+h1{margin:0 0 4px;font-size:1.8rem}h1 span{color:var(--ac);text-shadow:0 0 14px #39ff8866}
+.sub{color:var(--mu);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 0 28px #39ff8812,0 8px 24px #0008}
+.drop{display:flex;gap:10px;flex-wrap:wrap}
+button,label.btn{background:var(--ac);color:#04140b;border:0;border-radius:10px;padding:11px 16px;font-weight:700;font-size:1rem;cursor:pointer;display:inline-block}
+button.sec,label.btn.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+button:disabled{opacity:.5;cursor:default}
+input[type=file]{display:none}
+#status{margin:14px 0 0;color:var(--mu);min-height:1.4em}#status.err{color:var(--er)}
+#stage{display:none;margin-top:18px;gap:16px;grid-template-columns:1.4fr 1fr}
+@media(max-width:760px){#stage{grid-template-columns:1fr}}
+.wrap{position:relative;line-height:0;border-radius:12px;overflow:hidden;background:#000;touch-action:manipulation}
+.wrap img{width:100%;height:auto;display:block}
+.box{position:absolute;border:2px solid #39ff88aa;border-radius:6px;background:transparent;cursor:pointer;transition:all .2s;padding:0}
+.box span{position:absolute;left:-2px;top:-22px;background:#39ff88;color:#04140b;font:700 12px/18px system-ui;padding:0 6px;border-radius:5px;white-space:nowrap;display:none;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+.box:hover span,.box.sel span{display:block}
+.box.sel{border-color:#39ff88;box-shadow:0 0 0 2px #39ff88,0 0 18px #39ff88}
+.wrap.has-sel .box:not(.sel){border-color:#39ff8833}
+.shade{position:absolute;inset:0;background:#000b;opacity:0;transition:opacity .25s;pointer-events:none}
+.wrap.has-sel .shade{opacity:1}
+.box.sel{z-index:3;box-shadow:0 0 0 9999px #000a,0 0 0 2px #39ff88,0 0 18px #39ff88}
+#side h2{margin:0 0 4px;font-size:1.3rem}
+.cat{color:var(--mu);font-size:.9rem;margin-bottom:10px}
+.price{background:#0a2416;border:1px solid var(--ac);border-radius:12px;padding:12px 14px;margin:10px 0;box-shadow:0 0 22px #39ff8822}
+.price .lbl{font-size:.8rem;color:var(--mu);text-transform:uppercase;letter-spacing:.06em}
+.price .big{font-size:2.3rem;font-weight:800;color:var(--ac);text-shadow:0 0 16px #39ff8877;line-height:1.2}
+.price .rng{color:var(--tx);font-size:.95rem}
+.ctx{margin:8px 0;color:var(--tx)}
+.mu{color:var(--mu);font-size:.85rem}
+.list{margin-top:14px;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
+.item{display:flex;justify-content:space-between;gap:8px;background:#0e1512;border:1px solid var(--line);border-radius:9px;padding:8px 10px;cursor:pointer;text-align:left;color:var(--tx);font-weight:500;font-size:.92rem;width:100%}
+.item.sel{border-color:var(--ac)}
+.item b{color:var(--ac);white-space:nowrap}
+.note{color:var(--mu);font-size:.82rem;margin-top:22px}
+a{color:var(--ac)}
+</style>
+</head>
+<body>
+<main>
+<h1>Tasa<span>-Lens</span></h1>
+<p class="sub">Sube o haz una foto con varios objetos. Los detecto todos, y al pulsar uno te muestro su ficha y su precio estimado.</p>
+<div class="card">
+  <div class="drop">
+    <label class="btn">📷 Hacer foto<input id="cam" type="file" accept="image/*" capture="environment"></label>
+    <label class="btn sec">🖼️ Subir imagen<input id="file" type="file" accept="image/*"></label>
+  </div>
+  <div id="status"></div>
+  <div id="stage">
+    <div class="wrap" id="wrap"><img id="img" alt="Foto analizada"><div class="shade"></div></div>
+    <div id="side"><div class="mu">Pulsa un recuadro de la foto o un objeto de la lista.</div><div class="list" id="list"></div></div>
+  </div>
+</div>
+<p class="note">⚠️ Los precios son <b>estimaciones de la IA</b> basadas en su conocimiento general del mercado de segunda mano y comercio electrónico. No son anuncios en vivo ni tasaciones: compruébalos en Wallapop, eBay, Vinted o Amazon antes de comprar o vender. La imagen se envía a Google (Gemini) para analizarla.</p>
+</main>
+<script>
+const GEMINI_PROXY_URL = "https://gemini-proxy.francesc-adria-perello.workers.dev/";
+const $ = id => document.getElementById(id);
+let items = [], sel = -1;
+
+function status(t, err){ const s=$("status"); s.textContent=t||""; s.className=err?"err":""; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+const eur = n => (typeof n==="number" && isFinite(n)) ? new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:n<10?2:0}).format(n) : "—";
+
+function toB64(file){
+  return new Promise((res,rej)=>{
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = ()=>{
+      const m = 1280, k = Math.min(1, m/Math.max(im.width, im.height));
+      const c = document.createElement("canvas"); c.width = Math.round(im.width*k); c.height = Math.round(im.height*k);
+      c.getContext("2d").drawImage(im,0,0,c.width,c.height);
+      const d = c.toDataURL("image/jpeg",0.85); URL.revokeObjectURL(url);
+      res({dataUrl:d, b64:d.split(",")[1]});
+    };
+    im.onerror = ()=>rej(new Error("No se pudo leer la imagen."));
+    im.src = url;
+  });
+}
+
+async function askGemini(prompt, b64){
+  const body = {
+    contents:[{parts:[{text:prompt},{inline_data:{mime_type:"image/jpeg",data:b64}}]}],
+    generationConfig:{responseMimeType:"application/json",temperature:0,thinkingConfig:{thinkingLevel:"low"}}
+  };
+  const r = await fetch(GEMINI_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error(r.status===429?"Límite de uso de Gemini alcanzado. Inténtalo más tarde.":`Gemini respondió con error ${r.status}.`);
+  const j = await r.json();
+  const t = j?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("")||"";
+  try{ return JSON.parse(t.replace(/^```json|```$/g,"").trim()); }catch{ return null; }
+}
+
+const PROMPT = `Analiza esta foto. Detecta TODOS los objetos relevantes y distinguibles (muebles, electrónica, libros, juguetes, herramientas, ropa, decoración, etc.), ignorando fondo, paredes, suelo y cosas diminutas o irrelevantes. Máximo 20 objetos. Para cada uno devuelve un recuadro ajustado y una ficha. Responde solo con un array JSON: [{"box_2d":[ymin,xmin,ymax,xmax],"name":string,"category":string,"context":string,"price_low":number|null,"price_avg":number|null,"price_high":number|null,"price_basis":string,"confidence":number}]. Reglas: box_2d son enteros de 0 a 1000 relativos al tamaño de la imagen. name y category en español (name concreto: marca y modelo si se ven; si no, descripción genérica). context: una frase corta en español (qué es, para qué sirve, estado o detalle visible). Precios en EUR: estimación del valor medio actual de venta en plataformas de segunda mano (Wallapop, eBay, Vinted) o, si es nuevo/de uso común, en comercio electrónico; price_low y price_high forman un rango razonable. price_basis: "segunda mano" o "nuevo". confidence de 0 a 1. Si no puedes estimar el precio, usa null. No inventes marcas ni modelos que no se vean.`;
+
+async function analyze(file){
+  if(!file) return;
+  try{
+    items=[]; sel=-1; $("stage").style.display="none";
+    status("Preparando la imagen…");
+    const {dataUrl,b64} = await toB64(file);
+    $("img").src = dataUrl;
+    status("Detectando objetos y estimando precios con Gemini…");
+    const out = await askGemini(PROMPT,b64);
+    const arr = Array.isArray(out)?out:(out&&Array.isArray(out.objects)?out.objects:null);
+    if(!arr) throw new Error("No he podido interpretar la respuesta. Prueba con otra foto.");
+    items = arr.filter(o=>Array.isArray(o.box_2d)&&o.box_2d.length===4&&o.box_2d.every(Number.isFinite)).slice(0,20);
+    if(!items.length) throw new Error("No he detectado objetos claros. Prueba con una foto más nítida o más cercana.");
+    render(); status(`${items.length} objetos detectados. Pulsa uno para ver su ficha.`);
+  }catch(e){ status(e.message||"Error inesperado.",true); }
+}
+
+function render(){
+  $("stage").style.display="grid";
+  const wrap=$("wrap"); wrap.querySelectorAll(".box").forEach(n=>n.remove());
+  items.forEach((o,i)=>{
+    let [y1,x1,y2,x2]=o.box_2d.map(v=>Math.max(0,Math.min(1000,v)));
+    const b=document.createElement("button"); b.className="box"; b.type="button"; b.dataset.i=i;
+    b.style.cssText=`top:${y1/10}%;left:${x1/10}%;height:${(y2-y1)/10}%;width:${(x2-x1)/10}%`;
+    b.setAttribute("aria-label",o.name||"Objeto");
+    b.innerHTML=`<span>${esc(o.name||"Objeto")}</span>`;
+    b.onclick=e=>{e.stopPropagation();select(i)};
+    wrap.appendChild(b);
+  });
+  wrap.onclick=()=>select(-1);
+  select(-1);
+}
+
+function select(i){
+  sel=i;
+  $("wrap").classList.toggle("has-sel",i>=0);
+  document.querySelectorAll(".box").forEach(b=>b.classList.toggle("sel",+b.dataset.i===i));
+  const side=$("side");
+  let h="";
+  if(i>=0){
+    const o=items[i], avg=o.price_avg, lo=o.price_low, hi=o.price_high;
+    h+=`<h2>${esc(o.name||"Objeto")}</h2><div class="cat">${esc(o.category||"Sin categoría")}</div>`;
+    h+=`<div class="price"><div class="lbl">Precio estimado${o.price_basis?` · ${esc(o.price_basis)}`:""}</div><div class="big">${eur(avg!=null?avg:(lo!=null&&hi!=null?(lo+hi)/2:null))}</div>`;
+    if(lo!=null&&hi!=null) h+=`<div class="rng">Rango: ${eur(lo)} – ${eur(hi)}</div>`;
+    h+=`<div class="mu">Estimación de la IA, no un anuncio en vivo.</div></div>`;
+    if(o.context) h+=`<div class="ctx">${esc(o.context)}</div>`;
+    if(typeof o.confidence==="number") h+=`<div class="mu">Confianza de la identificación: ${Math.round(o.confidence*100)}%</div>`;
+    const q=encodeURIComponent(o.name||"");
+    h+=`<div class="mu" style="margin-top:8px">Comprobar: <a target="_blank" rel="noopener" href="https://es.wallapop.com/app/search?keywords=${q}">Wallapop</a> · <a target="_blank" rel="noopener" href="https://www.ebay.es/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1">eBay (vendidos)</a> · <a target="_blank" rel="noopener" href="https://www.google.com/search?tbm=shop&q=${q}">Shopping</a></div>`;
+    h+=`<p><button class="sec" type="button" onclick="select(-1)">Ver todos</button></p>`;
+  } else h+=`<div class="mu">Pulsa un recuadro de la foto o un objeto de la lista.</div>`;
+  h+=`<div class="list">`+items.map((o,k)=>`<button type="button" class="item${k===i?" sel":""}" onclick="select(${k})"><span>${esc(o.name||"Objeto")}</span><b>${eur(o.price_avg)}</b></button>`).join("")+`</div>`;
+  side.innerHTML=h;
+}
+
+$("cam").onchange=e=>analyze(e.target.files[0]);
+$("file").onchange=e=>analyze(e.target.files[0]);
+</script>
+</body>
+</html>
