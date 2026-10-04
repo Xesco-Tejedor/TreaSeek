@@ -37,6 +37,13 @@ input[type=file]{display:none}
 .price .big{font-size:2.3rem;font-weight:800;color:var(--ac);text-shadow:0 0 16px #39ff8877;line-height:1.2}
 .price .rng{color:var(--tx);font-size:.95rem}
 .ctx{margin:8px 0;color:var(--tx)}
+.ebay{border:1px solid #3a3f4a;border-radius:12px;padding:10px 12px;margin:12px 0;background:#10131a}
+.ebay h3{margin:0 0 6px;font-size:.95rem}
+.ebay .row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #232733;font-size:.88rem}
+.ebay .row a{color:var(--tx);text-decoration:none;flex:1}
+.ebay .row a:hover{text-decoration:underline}
+.ebay .row b{white-space:nowrap}
+.ebay .stats{font-size:.9rem;margin:4px 0 6px}
 .mu{color:var(--mu);font-size:.85rem}
 .list{margin-top:14px;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
 .item{display:flex;justify-content:space-between;gap:8px;background:#0e1512;border:1px solid var(--line);border-radius:9px;padding:8px 10px;cursor:pointer;text-align:left;color:var(--tx);font-weight:500;font-size:.92rem;width:100%}
@@ -64,7 +71,7 @@ a{color:var(--ac)}
     <div id="side"><div class="mu">Pulsa un recuadro de la foto o un objeto de la lista.</div><div class="list" id="list"></div></div>
   </div>
 </div>
-<p class="note">⚠️ Los precios son <b>estimaciones de la IA</b> basadas en su conocimiento general del mercado de segunda mano y comercio electrónico. No son anuncios en vivo ni tasaciones: compruébalos en Wallapop, eBay, Vinted o Amazon antes de comprar o vender. La imagen se envía a OpenRouter (modelos gratuitos) o, si falla, a Google (Gemini) para analizarla.</p>
+<p class="note">⚠️ Los precios son <b>estimaciones de la IA</b> basadas en su conocimiento general del mercado de segunda mano y comercio electrónico. No son tasaciones: compruébalos en Wallapop, eBay, Vinted o Amazon antes de comprar o vender. Los anuncios activos de eBay (si los pides) se muestran aparte y no se mezclan con la estimación. La imagen se envía a OpenRouter (modelos gratuitos) o, si falla, a Google (Gemini) para analizarla.</p>
 </main>
 <script>
 const GEMINI_PROXY_URL = "https://gemini-proxy.francesc-adria-perello.workers.dev/";
@@ -165,8 +172,28 @@ function render(){
 
 function backToPhoto(){ select(-1); $("wrap").scrollIntoView({behavior:"smooth",block:"center"}); }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && sel>=0) select(-1); });
+let ebayTok=0;
+async function loadEbay(i){
+  const o=items[i], box=$("ebay"); if(!o||!box) return;
+  const tok=++ebayTok;
+  box.innerHTML=`<h3>Anuncios activos en eBay.es</h3><div class="mu">Buscando…</div>`;
+  let d;
+  try{
+    const r=await fetch(GEMINI_PROXY_URL+"ebay",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:o.name||""})});
+    d=await r.json(); if(!r.ok) throw new Error((d.error&&d.error.message)||"error");
+  }catch(e){ if(tok===ebayTok&&sel===i) box.innerHTML=`<h3>Anuncios activos en eBay.es</h3><div class="mu">No se pudo consultar eBay ahora mismo.</div>`; return; }
+  if(tok!==ebayTok||sel!==i) return;
+  const L=(d.items||[]).filter(x=>x.price&&/^https:\/\//.test(x.url||"")).map(x=>({...x,p:parseFloat(x.price)})).filter(x=>isFinite(x.p));
+  const q=encodeURIComponent(o.name||"");
+  if(!L.length){ box.innerHTML=`<h3>Anuncios activos en eBay.es</h3><div class="mu">Sin anuncios activos para esta búsqueda.</div><div class="mu"><a target="_blank" rel="noopener" href="https://www.ebay.es/sch/i.html?_nkw=${q}">Ver en eBay</a></div>`; return; }
+  const P=L.map(x=>x.p).sort((a,b)=>a-b), n=P.length, med=n%2?P[(n-1)/2]:(P[n/2-1]+P[n/2])/2;
+  let h=`<h3>Anuncios activos en eBay.es</h3><div class="stats">${n} anuncios · mediana ${eur(med)} · de ${eur(P[0])} a ${eur(P[n-1])}</div>`;
+  h+=L.slice(0,8).map(x=>`<div class="row"><a target="_blank" rel="noopener" href="${esc(x.url)}">${esc(x.title)}</a><b>${eur(x.p)}</b></div>`).join("");
+  h+=`<div class="mu" style="margin-top:6px">Precios de salida de anuncios activos (no ventas), solo de los ${n} resultados mostrados, consultados ahora. No incluidos en la estimación de la IA. <a target="_blank" rel="noopener" href="https://www.ebay.es/sch/i.html?_nkw=${q}">Ver todos en eBay</a></div>`;
+  box.innerHTML=h;
+}
 function select(i){
-  sel=i;
+  sel=i; ebayTok++;
   $("wrap").classList.toggle("has-sel",i>=0);
   document.querySelectorAll(".box").forEach(b=>b.classList.toggle("sel",+b.dataset.i===i));
   const side=$("side");
@@ -182,6 +209,7 @@ function select(i){
     if(typeof o.confidence==="number") h+=`<div class="mu">Confianza de la identificación: ${Math.round(o.confidence*100)}%</div>`;
     const q=encodeURIComponent(o.name||"");
     h+=`<div class="mu" style="margin-top:8px">Comprobar: <a target="_blank" rel="noopener" href="https://es.wallapop.com/app/search?keywords=${q}">Wallapop</a> · <a target="_blank" rel="noopener" href="https://www.ebay.es/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1">eBay (vendidos)</a> · <a target="_blank" rel="noopener" href="https://www.google.com/search?tbm=shop&q=${q}">Shopping</a> · <a target="_blank" rel="noopener" href="https://www.vinted.es/catalog?search_text=${q}">Vinted</a> · <a target="_blank" rel="noopener" href="https://www.amazon.es/s?k=${q}">Amazon</a></div>`;
+    h+=`<div class="ebay" id="ebay"><h3>Anuncios activos en eBay.es</h3><button class="sec" type="button" onclick="loadEbay(${i})">Buscar anuncios en eBay</button><div class="mu" style="margin-top:6px">Datos de eBay, aparte de la estimación de la IA.</div></div>`;
   } else h+=`<div class="mu">Pulsa un recuadro de la foto o un objeto de la lista.</div>`;
   h+=`<div class="list">`+items.map((o,k)=>`<button type="button" class="item${k===i?" sel":""}" onclick="select(${k})"><span>${esc(o.name||"Objeto")}</span><b>${eur(o.price_avg)}</b></button>`).join("")+`</div>`;
   side.innerHTML=h;
